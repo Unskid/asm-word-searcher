@@ -7,30 +7,38 @@ DATASEG
 ; --------------------------
 ; Your variables here
 ; --------------------------
-filename db 'test.secret',0	
+readfilename db 'test.txt',0	
 handle dw 0   ; will be the file handle. the number that DOS assigns to the open file.
-buffer db 20 DUP ('$')
+buffer db 100 DUP ('$')
 errorhandle dw 0
+
+secretstring db 'test','$'
 startstring db 'Welcome to HANGMAN (V2)',10,13,'press p to start playing',10,13,'press h for help','$'
 helpstring db 'Hello there!',10,13,'here are the rules:',10,13,'press p to start playing then try to guess the currect word',10,13,'you have only 3 tries use it wisely ;)','$'
+
 healthstr db "Health : ",'$'
-stage1 db  '|','-----',10,13,'|',10,13,'|',10,13,'|',10,13,'|',10,13,'|','$'
+filename dw ?
+stage1 db 'stage1.bmp',0
+stage2 db 'stage2.bmp',0
+stage3 db 'stage3.bmp',0
 
-stage2 db  '|-----',10,13,'|    |',10,13,'|',10,13,'|',10,13,'|',10,13,'|','$'
-
-stage3 db '|-----',10,13,'|    |',10,13,'|    ☺',10,13,'|    |',10,13,'|   /\',10,13,'|','$'
-string1 db 'guess the word (','$'
+string1 db 'guess the word','$'
 extrastring1 db ' chars)','$'
 gameoverstring db "Game Over",10,13,'You Lost','$'
 successMsg1 db 'Congratulations the word:','$'
-successMsg2 db 'is the secret!','$'
-tryagain db 'try again...',10,13,'$'
+successMsg2 db ' is the secret!','$'
+
+tryagain db 'Nope, try again...',10,13,'$'
 stringFromUser db 20 dup('$')
-health db 3
+health dw 3
 errormsg db 'error opening the file',10,13,'$'
 line db 10, 13, '$'
 
-
+filehandle dw ?
+Header db 54 dup (0)
+Palette db 256*4 dup (0)
+ScrLine db 320 dup (0)
+ErrorMsge db 'Error', 13, 10,'$'
 
 INSTR1 DB 20 DUP('$')
 LN DB 5 DUP('$')
@@ -39,6 +47,94 @@ S DB ?
 
 
 CODESEG
+proc OpenBitmap
+	; Open file
+	mov ah, 3Dh
+	xor al, al
+	mov dx, [filename]
+	int 21h
+	jc openerror1
+	mov [filehandle], ax
+
+	jmp fileopened
+	openerror1:
+	mov dx, offset ErrorMsge
+	mov ah, 9h
+	int 21h
+	ret
+	fileopened:
+	; Read BMP file header, 54 bytes
+	mov ah,3fh
+	mov bx, [filehandle]
+	mov cx,54
+	mov dx,offset Header
+	int 21h
+	; Read BMP file color palette, 256 colors * 4 bytes (400h)
+	mov ah,3fh
+	mov cx,400h
+	mov dx,offset Palette
+	int 21h
+	; Copy the colors palette to the video memory
+	; The number of the first color should be sent to port 3C8h
+	; The palette is sent to port 3C9h
+	mov si,offset Palette
+	mov cx,256
+	mov dx,3C8h
+	mov al,0
+	; Copy starting color to port 3C8h
+	out dx,al
+	; Copy palette itself to port 3C9h
+	inc dx
+	PalLoop:
+	; Note: Colors in a BMP file are saved as BGR values rather than RGB.
+	mov al,[si+2] ; Get red value.
+	shr al,2 ; Max. is 255, but video palette maximal
+	; value is 63. Therefore dividing by 4.
+	out dx,al ; Send it.
+	mov al,[si+1] ; Get green value.
+	shr al,2
+	out dx,al ; Send it.
+	mov al,[si] ; Get blue value.
+	shr al,2
+	out dx,al ; Send it.
+	add si,4 ; Point to next color.
+	; (There is a null chr. after every color.)
+
+	loop PalLoop
+	; BMP graphics are saved upside-down.
+	; Read the graphic line by line (200 lines in VGA format),
+	; displaying the lines from bottom to top.
+	mov ax, 0A000h
+	mov es, ax
+	mov cx,200
+	PrintBMPLoop:
+	push cx
+	; di = cx*320, point to the correct screen line
+	mov di,cx
+	shl cx,6
+	shl di,8
+	add di,cx
+	; Read one line
+	mov ah,3fh
+	mov cx,320
+	mov dx,offset ScrLine
+	int 21h
+	; Copy one line into video memory
+	cld ; Clear direction flag, for movsb
+	mov cx,320
+	mov si,offset ScrLine
+
+	rep movsb ; Copy line to the screen
+	 ;rep movsb is same as the following code:
+	 ;mov es:di, ds:si
+	 ;inc si
+	 ;inc di
+	 ;dec cx
+	 ;loop until cx=0
+	pop cx
+	loop PrintBMPLoop
+	ret
+endp OpenBitmap
 proc printNum
 pusha
 add dl,30h
@@ -62,7 +158,7 @@ openFile:
 
 mov ah,3Dh
 xor al,al ;just like mov al,0
-mov dx,offset filename ;copy to dx filename RAM address
+mov dx,offset readfilename ;copy to dx filename RAM address
 int 21h
 jc openerror 
 mov [handle],ax
@@ -70,139 +166,57 @@ mov [handle],ax
 readFromFile:
 mov ah,3Fh
 mov bx,[handle]
-mov cx,20
-mov [buffer],'$'
+mov cx,100
+;mov [buffer],'$'
 mov dx,offset buffer
-call printstr
-
-openerror:
-mov [errorhandle],ax
-mov dx,offset errormsg
-call printstr
+int 21h
 
 closeFile:
 mov ah,3Eh
 mov bx,[handle]
 int 21h
 ret
+
+openerror:
+mov [errorhandle],ax
+mov dx,offset errormsg
+call printstr
+ret
+
 endp readfile2
 proc stringlength
-
 ;PRINT LENGTH OF STRING (DIRECT)
-        ADD BL,30H
-        MOV AH,02H
-        MOV DL,BL
-        INT 21H
+	ADD BL,30H
+	MOV AH,02H
+	MOV DL,BL
+	INT 21H
 
 
 
 ;PRINT LENGTH OF STRING ANOTHER WAY
-        ADD SI,2
-        MOV AX,00
+	ADD SI,2
+	MOV AX,00
 
 
-     LL2:
-	 	CMP SI,'$'
-        JE LL1
-        INC SI
-        ADD AL,1
-        JMP LL2
+	LL2:
+	CMP SI,'$'
+	JE LL1
+	INC SI
+	ADD AL,1
+	JMP LL2
 
-     LL1:SUB AL,1
-        ADD AL,30H
+	LL1:SUB AL,1
+	ADD AL,30H
 
-        MOV AH,02H
-        MOV DL,AL
-        INT 21H
+	MOV AH,02H
+	MOV DL,AL
+	INT 21H
 
 
-        MOV AH,4CH
-        INT 21H
+	MOV AH,4CH
+	INT 21H
 ret
 endp stringlength
-proc readFile
-		mov ah,3Dh   ; 3Dh of DOS Services opens a file.
-		mov al,0   ; 0 - for reading. 1 - for writing. 2 - both
-		mov dx,offset filename  ; make a pointer to the filename
-		int 21h  
-		jc openerr ; call DOS
-		mov [handle],ax   ; Function 3Dh returns the file handle in AX, here we save it for later use.
-
-	;'DOS Service Function number 3Fh reads from a file.
-
-		mov ah,3Fh
-		mov cx,10 ; I will assume ELMO.TXT has atleast 4 bytes in it. CX is how many bytes to read.
-		mov dx,offset buffer  ; DOS Functions like DX having pointers for some reason.
-		mov bx,[handle]    ; BX needs the file handle.
-		int 21h   ; call DOS
-
-	;Here we will put a $ after 4 bytes in the buffer and print the data read:
-		mov dx,offset buffer
-		add dx,ax    ; Function 3Fh returns the actual amount of bytes read in AX (should be 4 if
-				; nothing went wrong.
-		mov bx,dx
-		mov bx,'$'   ; byte pointer so we don't mess with the whole word (a word is 16bits).
-            
-               mov cl,20
-               mov bl,1
-            lea si,[buffer]
-            label1:  
-            mov al,[si] 
-            mov dl,al
-            mov ah,2h
-            int 21h
-            call moving1      
-            cmp al,'a'
-            jge changeLetter
-           
-           inc si 
-           dec cl
-           
-           
-           jnz label1
-           jz Print
-           ;;;;;;;;;;;;;;;;;
-           changeLetter:
-           cmp bl,1
-           je changefirst  
-    	   inc si 
-           dec cl
-           jnz label1
-           ;;;;;;;;;;;;;;;;       
-		             
-		   changefirst:
-		   inc si  
-		 
-		   mov al,[si]
-		   sub al,32d  
-		   mov [si],al
-		   mov bl,0
-		   
-		   dec si 
-		    inc si 
-           dec cl
-		   jnz label1  
-		     ;ret                
-		     
-	Print:
-		mov dx,offset buffer
-		call printstr 
-		mov dx,offset string1
-		call printstr
-		  
-moving1: 
-cmp al,' '
-
-je increment
-openerr:
-mov dx,offset errormsg
-call printstr
-ret
-increment:
-mov bl,1  
-ret
-endp readFile
-
 proc clearscreen
 mov al,03h
 	mov ah,0
@@ -236,11 +250,22 @@ proc newLine
 endp newLine
 
 proc isMatch
+
 mov al, [stringFromUser]
-cmp al,[buffer]
+
+cmp al,[secretstring]
+
 jne NotMatched
 mov dx,offset successMsg1
 call printStr
+mov dx,offset secretstring
+call printStr
+mov dx,offset successMsg2
+call printStr
+
+
+mov ax, 4c00h ; exit the program
+int 21h
 ;mov dx,offset stringFromUser
 ;call printStr
 ;mov dx,offset successMsg2
@@ -249,14 +274,61 @@ call printStr
 NotMatched:
 dec [health]
 cmp [health],0
-je gameOver
-mov dx, offset tryagain
-call printStr
-call getString
-gameOver:
+
+jne gameNotOver
 call clearscreen
+
 mov dx,offset gameoverstring
 call printStr
+
+mov ah,1
+int 21h
+jmp health1
+
+gameNotOver:
+cmp [health],1
+je health1
+
+cmp [health],2
+je health2
+
+cmp [health],3
+je health3
+
+health3:
+mov cx,offset stage1
+mov [filename],cx
+call OpenBitmap
+jmp endpic
+
+health2:
+mov cx,offset stage2
+mov [filename],cx
+call OpenBitmap
+jmp endpic
+
+health1:
+mov cx,offset stage3
+mov [filename],cx
+call OpenBitmap
+jmp endpic
+
+endpic:
+; Wait for key press
+	mov ah,1
+	int 21h
+	; Back to text mode
+	mov ah, 0
+	mov al, 2
+	int 10h
+	cmp [health],0
+	je exit
+
+mov cx,[health]
+add cx,2
+mov dx, offset tryagain
+call printStr
+
 ret
 endp isMatch
 
@@ -298,22 +370,21 @@ call clearscreen
 	printGameHealth:
 	mov dx,offset healthstr
 	call printstr
-	mov dl,[health]
+	mov dx,[health]
 	call printnum
 	
-	call readfile2
 	mov dx,offset string1
 	call printstr
 	
-	mov bl,[buffer+1]
-	call stringlength
-	
-	mov dx,offset extrastring1
-	call printstr
 
 	call newline
-
+	
+	mov cx,[health]
+	add cx,2
+	loopgame:
 	call getString
+	call isMatch
+	loop loopgame
 exit:
 	mov ax, 4c00h
 	int 21h
