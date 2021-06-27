@@ -3,7 +3,7 @@ MODEL small
 STACK 100h
 p186
 DATASEG
-
+jumps
 ; --------------------------
 ; Your variables here
 ; --------------------------
@@ -18,12 +18,11 @@ helpstring db 'Hello there!',10,13,'here are the rules:',10,13,'press p to start
 
 healthstr db "Health : ",'$'
 filename dw ?
-stage1 db 'stage1.bmp',0
-stage2 db 'stage2.bmp',0
-stage3 db 'stage3.bmp',0
-
-string1 db 'guess the word','$'
-extrastring1 db ' chars)','$'
+stage1 db 'pic2019.bmp',0
+stage2 db 'pic2019d.bmp',0
+stage3 db 'pic2019f.bmp',0
+stringlengthnum dw 0
+string1 db 'guess the word ','$'
 gameoverstring db "Game Over",10,13,'You Lost','$'
 successMsg1 db 'Congratulations the word:','$'
 successMsg2 db ' is the secret!','$'
@@ -48,6 +47,8 @@ S DB ?
 
 CODESEG
 proc OpenBitmap
+	mov ax, 13h
+	int 10h
 	; Open file
 	mov ah, 3Dh
 	xor al, al
@@ -133,6 +134,7 @@ proc OpenBitmap
 	 ;loop until cx=0
 	pop cx
 	loop PrintBMPLoop
+	;call clearscreen
 	ret
 endp OpenBitmap
 proc printNum
@@ -185,37 +187,19 @@ ret
 
 endp readfile2
 proc stringlength
-;PRINT LENGTH OF STRING (DIRECT)
-	ADD BL,30H
-	MOV AH,02H
-	MOV DL,BL
-	INT 21H
-
-
-
-;PRINT LENGTH OF STRING ANOTHER WAY
-	ADD SI,2
-	MOV AX,00
-
-
-	LL2:
-	CMP SI,'$'
-	JE LL1
-	INC SI
-	ADD AL,1
-	JMP LL2
-
-	LL1:SUB AL,1
-	ADD AL,30H
-
-	MOV AH,02H
-	MOV DL,AL
-	INT 21H
-
-
-	MOV AH,4CH
-	INT 21H
+mov si,0
+mov cx,2
+stringlengthloop:
+cmp [buffer+si],'$'
+jne notEqualD
+mov cx,0
 ret
+notEqualD:
+add si,1
+inc cx
+inc [stringlengthnum]
+
+loop stringlengthloop
 endp stringlength
 proc clearscreen
 mov al,03h
@@ -253,12 +237,12 @@ proc isMatch
 
 mov al, [stringFromUser]
 
-cmp al,[secretstring]
+cmp al,[buffer]
 
 jne NotMatched
 mov dx,offset successMsg1
 call printStr
-mov dx,offset secretstring
+call readfile2
 call printStr
 mov dx,offset successMsg2
 call printStr
@@ -266,10 +250,6 @@ call printStr
 
 mov ax, 4c00h ; exit the program
 int 21h
-;mov dx,offset stringFromUser
-;call printStr
-;mov dx,offset successMsg2
-;call printStr
 
 NotMatched:
 dec [health]
@@ -326,6 +306,12 @@ endpic:
 
 mov cx,[health]
 add cx,2
+
+mov dx,offset healthstr
+call printstr
+mov dx,[health]
+call printnum
+
 mov dx, offset tryagain
 call printStr
 
@@ -373,11 +359,14 @@ call clearscreen
 	mov dx,[health]
 	call printnum
 	
+	call readfile2
+
 	mov dx,offset string1
 	call printstr
-	
 
-	call newline
+	call stringlength
+	mov dx,[stringlengthnum]
+	call printNum 
 	
 	mov cx,[health]
 	add cx,2
